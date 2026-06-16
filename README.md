@@ -16,8 +16,8 @@ Provide a fast, version-aware, machine-readable alternative to the official Kube
 kubernetes/kubernetes (OpenAPI specs)
         │
         ▼
-  [spec-fetcher]  ← cron / CI job, fetches per-version OpenAPI v3 specs
-        │                                           writes to: kubernetools/specs
+  [spec-fetcher]  ← workflow_dispatch GitHub Action
+        │           binary in: kubernetools/specs — writes to: kubernetools/specs
         ▼
   [docgen] (Rust CLI)                              repo: kubernetools/docgen
         │   Parses OpenAPI JSON → renders HTML + sitemap + structured data
@@ -25,7 +25,7 @@ kubernetes/kubernetes (OpenAPI specs)
   kubernetools/site  (per-version HTML tree, auto-deployed)
         │
         ▼
-  Nginx / Kubernetes Ingress  ←  kubernetools.com  (config: kubernetools/infra)
+  Nginx / Kubernetes Ingress  ←  kubernetools.com  (config: kubernetools/infra — planned)
 ```
 
 ---
@@ -40,25 +40,26 @@ The project lives under the [`kubernetools`](https://github.com/kubernetools) Gi
 
 | Repository | Purpose |
 |---|---|
-| [`kubernetools/specs`](https://github.com/kubernetools/specs) | Cached OpenAPI v3 JSON per Kubernetes version (fetched from upstream) |
+| [`kubernetools/project`](https://github.com/kubernetools/project) | Project roadmap and documentation (this repo) |
+| [`kubernetools/specs`](https://github.com/kubernetools/specs) | Cached OpenAPI v3 JSON per Kubernetes version + Rust `spec-fetcher` binary |
 | [`kubernetools/docgen`](https://github.com/kubernetools/docgen) | Rust CLI: parses specs from `specs` and emits static HTML |
-| [`kubernetools/site`](https://github.com/kubernetools/site) | Generated static output, auto-deployed on each `docgen` run |
-| [`kubernetools/infra`](https://github.com/kubernetools/infra) | Kubernetes manifests, Ingress + cert-manager config |
+| [`kubernetools/site`](https://github.com/kubernetools/site) | Generated static output, deployed on each `docgen` run |
+| `kubernetools/infra` *(planned)* | Kubernetes manifests, Ingress + cert-manager config |
 
 **Toolchain decision: Rust**
 
 Rust is viable and preferred for performance. Key crates:
 - [`serde_json`](https://crates.io/crates/serde_json) — OpenAPI v3 spec parsing (see note below)
-- [`minijinja`](https://crates.io/crates/minijinja) or [`tera`](https://crates.io/crates/tera) — HTML templating
+- [`minijinja`](https://crates.io/crates/minijinja) — HTML templating
 - [`clap`](https://crates.io/crates/clap) — CLI interface
 - [`tokio`](https://crates.io/crates/tokio) + [`reqwest`](https://crates.io/crates/reqwest) — async spec fetching
 
 **Note on OpenAPI parsing**: [`openapiv3`](https://crates.io/crates/openapiv3) targets OpenAPI 3.0.x (which Kubernetes ships) but has a known deserialization bug with typeless / `AnySchema` fields ([#96](https://github.com/glademiller/openapiv3/issues/96)). Kubernetes uses these for `IntOrString`, `RawExtension`, and similar types, so hitting the bug is likely. The crate is also lightly maintained. Preferred approach: a bespoke `serde_json` deserializer targeting only the fields `docgen` needs (name, description, type, `$ref`, properties, `x-kubernetes-*` extensions) — simpler, no upstream dependency risk, and read-only use means full spec round-tripping is unnecessary.
 
 **Deliverables**
-- [ ] Parse a single OpenAPI v3 group spec and print a resource index
-- [ ] Emit one well-formed HTML page per API group/version/kind
-- [ ] Local preview via `python -m http.server` against `static/`
+- [x] Parse a single OpenAPI v3 group spec and print a resource index
+- [x] Emit one well-formed HTML page per API group/version/kind
+- [x] Local preview via `python -m http.server` against `site/`
 
 ---
 
@@ -139,23 +140,30 @@ A script (or small Rust binary) that:
 2. Downloads `api/openapi-spec/v3/*.json` for each version not yet cached in `kubernetools/specs`
 3. Opens a PR (or pushes directly) to `kubernetools/specs` and triggers a `docgen` run; drops specs for versions that have left the support window
 
-**CI pipeline (GitHub Actions)**
-```
-on:
-  schedule: "0 6 * * *"   # daily check for new releases
-  push: [main]
+**GitHub Actions workflows (current state)**
 
-jobs:
-  fetch-specs → docgen → validate-html → deploy
+All workflows are currently `workflow_dispatch` (manually triggered):
+
+| Repo | Workflow | Trigger | What it does |
+|------|----------|---------|--------------|
+| `specs` | `fetch-specs.yml` | manual | builds `spec-fetcher`, fetches specs for a given minor version, opens a PR |
+| `docgen` | `release.yml` | on tag `v*` | builds Linux + macOS binaries and publishes a GitHub release |
+| `site` | `build-release.yml` | manual | downloads latest `docgen` release, regenerates site, opens a PR |
+| `site` | `release.yml` | on tag `v*` | packages `site/` as a `.tgz` and publishes a GitHub release |
+
+Target pipeline (not yet automated end-to-end):
+```
+fetch-specs (cron) → docgen (on specs PR merge) → validate-html → deploy
 ```
 
 **Deployment**
 - `docgen` output goes into a container image or a PersistentVolume
 - Nginx serves static files from a `PersistentVolume`; Kubernetes `Ingress` (with cert-manager TLS) fronts it
 - `/docs/latest` → `return 302 /docs/v1.36/` (ConfigMap-driven Nginx config, bumped when a new minor is released; oldest supported version is dropped simultaneously)
+- Kubernetes manifests will live in `kubernetools/infra` *(not yet created)*
 
 **Deliverables**
-- [ ] Automated nightly check for new Kubernetes releases
+- [ ] Automated nightly check for new Kubernetes releases (convert `fetch-specs` to cron + auto-merge)
 - [ ] Zero-downtime deploy (rolling update or blue-green on the Ingress level)
 - [ ] `cert-manager` + Let's Encrypt TLS for `kubernetools.com`
 
