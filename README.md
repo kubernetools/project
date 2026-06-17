@@ -22,8 +22,12 @@ kubernetes/kubernetes (OpenAPI specs)
   [docgen] (Rust CLI)                              repo: kubernetools/docgen
         │   Parses OpenAPI JSON → renders HTML + sitemap + structured data
         ▼
-  kubernetools/site  (per-version HTML tree, auto-deployed)
+  kubernetools/site  (per-version HTML tree, packaged as .tgz release)
         │
+        ▼
+  kubernetools/deploy  (GH workflow: downloads site .tgz, builds container image)
+        │   Base image: registry.access.redhat.com/hi/nginx:latest
+        │   Site files embedded in image; Nginx configured at build time
         ▼
   Nginx / Kubernetes Ingress  ←  kubernetools.com  (config: kubernetools/infra — planned)
 ```
@@ -43,7 +47,8 @@ The project lives under the [`kubernetools`](https://github.com/kubernetools) Gi
 | [`kubernetools/project`](https://github.com/kubernetools/project) | Project roadmap and documentation (this repo) |
 | [`kubernetools/specs`](https://github.com/kubernetools/specs) | Cached OpenAPI v3 JSON per Kubernetes version + Rust `spec-fetcher` binary |
 | [`kubernetools/docgen`](https://github.com/kubernetools/docgen) | Rust CLI: parses specs from `specs` and emits static HTML |
-| [`kubernetools/site`](https://github.com/kubernetools/site) | Generated static output, deployed on each `docgen` run |
+| [`kubernetools/site`](https://github.com/kubernetools/site) | Generated static output, packaged as a `.tgz` release on each `docgen` run |
+| [`kubernetools/deploy`](https://github.com/kubernetools/deploy) | GH workflow: downloads site release, builds and pushes the Nginx container image |
 | `kubernetools/infra` *(planned)* | Kubernetes manifests, Ingress + cert-manager config |
 
 **Toolchain decision: Rust**
@@ -150,17 +155,23 @@ All workflows are currently `workflow_dispatch` (manually triggered):
 | `docgen` | `release.yml` | on tag `v*` | builds Linux + macOS binaries and publishes a GitHub release |
 | `site` | `build-release.yml` | manual | downloads latest `docgen` release, regenerates site, opens a PR |
 | `site` | `release.yml` | on tag `v*` | packages `site/` as a `.tgz` and publishes a GitHub release |
+| `deploy` | `build-image.yml` | on tag `v*` | downloads the site `.tgz`, builds and pushes the Nginx container image tagged with the version (see below) |
 
 Target pipeline (not yet automated end-to-end):
 ```
 fetch-specs (cron) → docgen (on specs PR merge) → validate-html → deploy
 ```
 
-**Deployment**
-- `docgen` output goes into a container image or a PersistentVolume
-- Nginx serves static files from a `PersistentVolume`; Kubernetes `Ingress` (with cert-manager TLS) fronts it
-- `/docs/latest` → `return 302 /docs/v1.36/` (ConfigMap-driven Nginx config, bumped when a new minor is released; oldest supported version is dropped simultaneously)
-- Kubernetes manifests will live in `kubernetools/infra` *(not yet created)*
+**Container image build (`kubernetools/deploy`)**
+
+The `build-image.yml` workflow in `kubernetools/deploy` is triggered by a tag push (`v*`). The pushed tag determines the version of the site release to embed:
+
+1. **Downloads the site release** — fetches the `.tgz` artifact from `kubernetools/site` whose tag matches the pushed tag.
+2. **Builds the container image** — uses `registry.access.redhat.com/hi/nginx:latest` as the base image. All static site files are copied into the image at build time (no runtime volume mounts needed). The tag version is embedded in the image (e.g. injected into the Nginx config or as image labels).
+3. **Configures Nginx** — an `nginx.conf` baked into the image handles static file serving, the `/docs/latest` redirect, precompressed asset delivery, and appropriate `Cache-Control` headers.
+4. **Pushes the image to the GitHub Container Registry** (`ghcr.io/kubernetools/deploy`) — tagged with the pushed version tag and as `latest`.
+
+Kubernetes deployment manifests will live in `kubernetools/infra` *(not yet created)*.
 
 **Deliverables**
 - [ ] Automated nightly check for new Kubernetes releases (convert `fetch-specs` to cron + auto-merge)
