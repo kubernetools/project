@@ -1,4 +1,4 @@
-# kubernetools.com — Kubernetes API Documentation
+# www.kubernetools.com — Kubernetes API Documentation
 
 A self-hosted, SEO-optimized, accessible reference for all Kubernetes API resources, generated automatically from the official OpenAPI specs.
 
@@ -6,7 +6,7 @@ A self-hosted, SEO-optimized, accessible reference for all Kubernetes API resour
 
 ## Goal
 
-Provide a fast, version-aware, machine-readable alternative to the official Kubernetes API docs at `kubernetools.com/docs/<version>/` with `/docs/latest` always pointing to the most recent stable release.
+Provide a fast, version-aware, machine-readable alternative to the official Kubernetes API docs at `www.kubernetools.com/docs/<version>/` with `/docs/latest` always pointing to the most recent stable release.
 
 ---
 
@@ -29,7 +29,7 @@ kubernetes/kubernetes (OpenAPI specs)
         │   Base image: registry.access.redhat.com/hi/nginx:latest
         │   Site files embedded in image; Nginx configured at build time
         ▼
-  Nginx / Kubernetes Ingress  ←  kubernetools.com  (config: kubernetools/infra — planned)
+  Nginx / Kubernetes Ingress  ←  www.kubernetools.com  (config: kubernetools/infra — planned)
 ```
 
 ---
@@ -176,7 +176,7 @@ Kubernetes deployment manifests will live in `kubernetools/infra` *(not yet crea
 **Deliverables**
 - [ ] Automated nightly check for new Kubernetes releases (convert `fetch-specs` to cron + auto-merge)
 - [ ] Zero-downtime deploy (rolling update or blue-green on the Ingress level)
-- [ ] `cert-manager` + Let's Encrypt TLS for `kubernetools.com`
+- [ ] `cert-manager` + Let's Encrypt TLS for `www.kubernetools.com`
 
 ---
 
