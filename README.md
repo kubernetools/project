@@ -73,16 +73,15 @@ Rust is viable and preferred for performance. Key crates:
 **URL scheme**
 
 ```
-/docs/latest/                        → index of all API groups (latest version, served directly — no redirect)
+/docs/latest/                        → index of all API groups (latest version, generated directly)
 /docs/latest/core/v1/pod/           → Pod resource page (canonical, indexed by search engines)
 /docs/latest/apps/v1/deployment/    → Deployment resource page
-/docs/v1.36/                         → same content as /docs/latest/, but noindex + canonical → /docs/latest/
-/docs/v1.36/core/v1/pod/            → same as above; not in sitemap
+/docs/v1.36/core/v1/pod/            → version-pinned page; noindex + canonical → /docs/latest/core/v1/pod/
 /docs/v1.33/core/v1/pod/            → older version; noindex + canonical → /docs/latest/core/v1/pod/
 ...
 ```
 
-`/docs/latest/` is served via an Nginx `alias` pointing to the latest-version directory — no HTTP redirect. This keeps `/docs/latest/...` URLs stable across Kubernetes releases so bookmarks, external links, and search-engine indices never break. Version-specific paths remain accessible for direct linking and version comparison but are excluded from SEO.
+`/docs/latest/` is a physical directory generated directly by `docgen` when invoked with `--is-latest` — links within it use `/docs/latest/...` absolute paths. All versions (including the current one) are regenerated from scratch on each release. This keeps `/docs/latest/...` URLs stable across Kubernetes releases so bookmarks, external links, and search-engine indices never break. Version-specific paths remain accessible for direct linking and version comparison but are excluded from SEO.
 
 **Per-resource page content**
 - Resource description (from spec `description` field)
@@ -101,7 +100,7 @@ Rust is viable and preferred for performance. Key crates:
 - [ ] Full recursive field rendering for all resource types
 - [ ] Cross-links between related resources (e.g. PodSpec → Container)
 - [ ] Version selector nav component
-- [ ] `/docs/latest/` served via Nginx `alias` (no redirect)
+- [ ] `docgen --is-latest` generates `/docs/latest/` with absolute `/docs/latest/...` links
 
 ---
 
@@ -174,7 +173,6 @@ The `build-image.yml` workflow in `kubernetools/deploy` is triggered by a tag pu
 2. **Builds the container image** — uses `registry.access.redhat.com/hi/nginx:latest` as the base image. All static site files are copied into the image at build time (no runtime volume mounts needed). The tag version is embedded in the image (e.g. injected into the Nginx config or as image labels).
 3. **Configures Nginx** — an `nginx.conf` baked into the image handles:
    - Static file serving with precompressed (gzip + brotli) asset delivery
-   - `/docs/latest/` served via `alias` pointing to the latest-version directory (no redirect)
    - `X-Robots-Tag: noindex` on all `/docs/v*/` locations
    - `Cache-Control: max-age=31536000, immutable` on versioned assets; `Cache-Control: no-cache` on `/docs/latest/`
 4. **Pushes the image to the GitHub Container Registry** (`ghcr.io/kubernetools/deploy`) — tagged with the pushed version tag and as `latest`.
