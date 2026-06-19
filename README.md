@@ -6,7 +6,7 @@ A self-hosted, SEO-optimized, accessible reference for all Kubernetes API resour
 
 ## Goal
 
-Provide a fast, version-aware, machine-readable alternative to the official Kubernetes API docs at `www.kubernetools.com/docs/<version>/` with `/docs/latest` always pointing to the most recent stable release.
+Provide a fast, version-aware, machine-readable alternative to the official Kubernetes API docs at `www.kubernetools.com/docs/latest/` (stable, search-engine-indexed) and `www.kubernetools.com/docs/<version>/` (version-pinned, noindex).
 
 ---
 
@@ -73,13 +73,16 @@ Rust is viable and preferred for performance. Key crates:
 **URL scheme**
 
 ```
-/docs/latest/                        → redirects to /docs/v1.36/
-/docs/v1.36/                         → index of all API groups
-/docs/v1.36/core/v1/pod/            → Pod resource page
-/docs/v1.36/apps/v1/deployment/     → Deployment resource page
-/docs/v1.36/batch/v1/job/
+/docs/latest/                        → index of all API groups (latest version, served directly — no redirect)
+/docs/latest/core/v1/pod/           → Pod resource page (canonical, indexed by search engines)
+/docs/latest/apps/v1/deployment/    → Deployment resource page
+/docs/v1.36/                         → same content as /docs/latest/, but noindex + canonical → /docs/latest/
+/docs/v1.36/core/v1/pod/            → same as above; not in sitemap
+/docs/v1.33/core/v1/pod/            → older version; noindex + canonical → /docs/latest/core/v1/pod/
 ...
 ```
+
+`/docs/latest/` is served via an Nginx `alias` pointing to the latest-version directory — no HTTP redirect. This keeps `/docs/latest/...` URLs stable across Kubernetes releases so bookmarks, external links, and search-engine indices never break. Version-specific paths remain accessible for direct linking and version comparison but are excluded from SEO.
 
 **Per-resource page content**
 - Resource description (from spec `description` field)
@@ -98,7 +101,7 @@ Rust is viable and preferred for performance. Key crates:
 - [ ] Full recursive field rendering for all resource types
 - [ ] Cross-links between related resources (e.g. PodSpec → Container)
 - [ ] Version selector nav component
-- [ ] `/docs/latest` redirect via Nginx `return 302`
+- [ ] `/docs/latest/` served via Nginx `alias` (no redirect)
 
 ---
 
@@ -107,10 +110,11 @@ Rust is viable and preferred for performance. Key crates:
 **SEO**
 - Semantic HTML5 (`<article>`, `<nav>`, `<section>`, `<header>`)
 - Unique, descriptive `<title>` and `<meta name="description">` per page
-- Canonical URLs (`<link rel="canonical">`)
+- Canonical URLs: `/docs/latest/...` pages carry a self-referencing canonical; version-specific pages (`/docs/v1.36/...`) carry `<link rel="canonical" href="/docs/latest/...">` pointing at the stable URL
+- Version-specific paths get `X-Robots-Tag: noindex` via Nginx so crawlers skip them without needing per-page `<meta>` tags
+- `sitemap.xml` contains only `/docs/latest/...` URLs (version-specific paths omitted entirely)
+- `robots.txt` allowing full crawl of `/docs/latest/`; `Disallow: /docs/v` to block version-specific crawling as a belt-and-suspenders measure
 - JSON-LD structured data (`TechArticle` / `APIReference` schema)
-- `sitemap.xml` generated per version + aggregate sitemap index
-- `robots.txt` allowing full crawl
 - OpenGraph tags for social sharing
 - Stable, clean URLs (no query strings, no fragments for primary content)
 
@@ -127,7 +131,7 @@ Rust is viable and preferred for performance. Key crates:
 - Inline critical CSS, defer non-critical
 - Precompressed (gzip + brotli) assets served by Nginx
 - `Cache-Control: max-age=31536000, immutable` on versioned assets
-- `Cache-Control: no-cache` on `/latest` redirect and index pages
+- `Cache-Control: no-cache` on `/docs/latest/` pages (content changes on each release)
 
 **Deliverables**
 - [ ] Lighthouse score ≥ 90 on Performance, Accessibility, Best Practices, SEO
@@ -168,7 +172,11 @@ The `build-image.yml` workflow in `kubernetools/deploy` is triggered by a tag pu
 
 1. **Downloads the site release** — fetches the `.tgz` artifact from `kubernetools/site` whose tag matches the pushed tag.
 2. **Builds the container image** — uses `registry.access.redhat.com/hi/nginx:latest` as the base image. All static site files are copied into the image at build time (no runtime volume mounts needed). The tag version is embedded in the image (e.g. injected into the Nginx config or as image labels).
-3. **Configures Nginx** — an `nginx.conf` baked into the image handles static file serving, the `/docs/latest` redirect, precompressed asset delivery, and appropriate `Cache-Control` headers.
+3. **Configures Nginx** — an `nginx.conf` baked into the image handles:
+   - Static file serving with precompressed (gzip + brotli) asset delivery
+   - `/docs/latest/` served via `alias` pointing to the latest-version directory (no redirect)
+   - `X-Robots-Tag: noindex` on all `/docs/v*/` locations
+   - `Cache-Control: max-age=31536000, immutable` on versioned assets; `Cache-Control: no-cache` on `/docs/latest/`
 4. **Pushes the image to the GitHub Container Registry** (`ghcr.io/kubernetools/deploy`) — tagged with the pushed version tag and as `latest`.
 
 Kubernetes deployment manifests will live in `kubernetools/infra` *(not yet created)*.
